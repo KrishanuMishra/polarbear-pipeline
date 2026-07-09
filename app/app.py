@@ -12,6 +12,7 @@ VERSION = os.environ.get("APP_VERSION", "dev")
 def index():
     return jsonify(
         {
+            "author": "Krishanu Mishra",
             "service": "polaris-app",
             "version": VERSION,
             "status": "ok",
