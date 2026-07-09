@@ -1,0 +1,38 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-push
+  namespace: polaris-pipeline
+  labels:
+    app.kubernetes.io/part-of: polaris-pipeline
+spec:
+  description: Build a container image with Kaniko and push to the minikube registry
+  params:
+    - name: image
+      description: Full image reference (registry/repo:tag)
+      type: string
+    - name: context
+      description: Build context directory relative to the workspace root
+      type: string
+      default: app
+    - name: dockerfile
+      description: Dockerfile path relative to the context directory
+      type: string
+      default: Dockerfile
+    - name: insecure-registry
+      description: Registry host that allows insecure (HTTP) pushes
+      type: string
+      default: registry.kube-system.svc.cluster.local:80
+  workspaces:
+    - name: source
+      description: Workspace containing source code
+  steps:
+    - name: build-and-push
+      image: gcr.io/kaniko-project/executor:v1.23.2
+      args:
+        - --dockerfile=$(params.context)/$(params.dockerfile)
+        - --context=$(workspaces.source.path)/$(params.context)
+        - --destination=$(params.image)
+        - --insecure
+        - --skip-tls-verify
+        - --insecure-registry=$(params.insecure-registry)

@@ -1,0 +1,27 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: run-tests
+  namespace: polaris-pipeline
+  labels:
+    app.kubernetes.io/part-of: polaris-pipeline
+spec:
+  description: Run Python unit tests for the Polaris app
+  params:
+    - name: context
+      description: Path to application source inside the workspace
+      type: string
+      default: app
+  workspaces:
+    - name: source
+      description: Workspace containing cloned source code
+  steps:
+    - name: test
+      image: python:3.12-slim
+      workingDir: $(workspaces.source.path)
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        pip install --quiet flask==3.1.0 pytest==8.3.4
+        cd "$(params.context)"
+        python -m pytest -v test_app.py

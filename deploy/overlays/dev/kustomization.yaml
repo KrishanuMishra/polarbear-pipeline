@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - ../../base
+
+namespace: polaris-dev
+
+commonLabels:
+  app.kubernetes.io/part-of: polaris-pipeline
+  app.kubernetes.io/managed-by: argocd
+
+images:
+  - name: polaris-app
+    newName: registry.kube-system.svc.cluster.local:80/polaris-app
+    newTag: v0.1.0
+
+patches:
+  - path: deployment-patch.yaml
+  - path: service-patch.yaml

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local lab config (may contain tokens)
+config/lab.env
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Tekton workspace artifacts
+.tekton-workspace/

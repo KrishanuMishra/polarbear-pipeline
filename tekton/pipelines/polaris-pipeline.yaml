@@ -1,0 +1,85 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: polaris-pipeline
+  namespace: polaris-pipeline
+  labels:
+    app.kubernetes.io/part-of: polaris-pipeline
+spec:
+  description: Clone, test, build, push, and update Git manifests for Polaris
+  params:
+    - name: git-url
+      type: string
+    - name: git-revision
+      type: string
+      default: main
+    - name: image-tag
+      type: string
+    - name: image-name
+      type: string
+      default: polaris-app
+    - name: overlay-path
+      type: string
+      default: deploy/overlays/dev
+  workspaces:
+    - name: shared-workspace
+    - name: git-credentials
+      optional: true
+  tasks:
+    - name: clone
+      taskRef:
+        name: git-clone
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+        - name: subdirectory
+          value: ""
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+
+    - name: test
+      runAfter:
+        - clone
+      taskRef:
+        name: run-tests
+      params:
+        - name: context
+          value: app
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: build
+      runAfter:
+        - test
+      taskRef:
+        name: build-push
+      params:
+        - name: image
+          value: registry.kube-system.svc.cluster.local:80/$(params.image-name):$(params.image-tag)
+        - name: context
+          value: app
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: update-manifests
+      runAfter:
+        - build
+      taskRef:
+        name: update-manifests
+      params:
+        - name: revision
+          value: $(params.git-revision)
+        - name: image-name
+          value: $(params.image-name)
+        - name: image-tag
+          value: $(params.image-tag)
+        - name: overlay-path
+          value: $(params.overlay-path)
+      workspaces:
+        - name: source
+          workspace: shared-workspace

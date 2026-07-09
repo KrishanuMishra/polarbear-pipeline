@@ -1,0 +1,57 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: git-clone
+  namespace: polaris-pipeline
+  labels:
+    app.kubernetes.io/part-of: polaris-pipeline
+spec:
+  description: Clone a git repository into the workspace
+  params:
+    - name: url
+      description: Git repository URL
+      type: string
+    - name: revision
+      description: Git revision to checkout
+      type: string
+      default: main
+    - name: subdirectory
+      description: Subdirectory inside the workspace to clone into
+      type: string
+      default: ""
+  workspaces:
+    - name: output
+      description: Workspace where the repo is cloned
+  steps:
+    - name: clone
+      image: alpine/git:2.45.2
+      env:
+        - name: PARAM_URL
+          value: $(params.url)
+        - name: PARAM_REVISION
+          value: $(params.revision)
+        - name: PARAM_SUBDIRECTORY
+          value: $(params.subdirectory)
+        - name: WORKSPACE_OUTPUT_PATH
+          value: $(workspaces.output.path)
+        - name: GIT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: git-credentials
+              key: token
+              optional: true
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+
+        checkout_dir="${WORKSPACE_OUTPUT_PATH}"
+        if [ -n "${PARAM_SUBDIRECTORY}" ]; then
+          checkout_dir="${WORKSPACE_OUTPUT_PATH}/${PARAM_SUBDIRECTORY}"
+        fi
+
+        clone_url="${PARAM_URL}"
+        if [ -n "${GIT_TOKEN:-}" ]; then
+          clone_url="$(echo "${PARAM_URL}" | sed -E "s#https://#https://${GIT_TOKEN}@#")"
+        fi
+
+        git clone --depth 1 --branch "${PARAM_REVISION}" "${clone_url}" "${checkout_dir}"

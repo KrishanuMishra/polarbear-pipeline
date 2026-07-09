@@ -1,0 +1,32 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: polaris-pipeline-run
+  namespace: polaris-pipeline
+  labels:
+    app.kubernetes.io/part-of: polaris-pipeline
+spec:
+  pipelineRef:
+    name: polaris-pipeline
+  params:
+    - name: git-url
+      value: REPLACE_WITH_YOUR_GIT_URL
+    - name: git-revision
+      value: main
+    - name: image-tag
+      value: v0.1.1
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+    - name: git-credentials
+      secret:
+        secretName: git-credentials
+        optional: true
+  taskRunTemplate:
+    serviceAccountName: polaris-pipeline

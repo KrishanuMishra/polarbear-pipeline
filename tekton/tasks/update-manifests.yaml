@@ -1,0 +1,79 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: update-manifests
+  namespace: polaris-pipeline
+  labels:
+    app.kubernetes.io/part-of: polaris-pipeline
+spec:
+  description: Update Kustomize image tag and push changes back to Git
+  params:
+    - name: revision
+      description: Branch to commit to
+      type: string
+      default: main
+    - name: image-name
+      description: Image name in kustomization.yaml
+      type: string
+      default: polaris-app
+    - name: image-tag
+      description: New image tag to set
+      type: string
+    - name: overlay-path
+      description: Path to the Kustomize overlay from repo root
+      type: string
+      default: deploy/overlays/dev
+    - name: git-user-name
+      type: string
+      default: polaris-pipeline
+    - name: git-user-email
+      type: string
+      default: polaris-pipeline@local.dev
+  workspaces:
+    - name: source
+      description: Workspace containing cloned source code
+  steps:
+    - name: update-and-push
+      image: alpine/git:2.45.2
+      workingDir: $(workspaces.source.path)
+      env:
+        - name: GIT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: git-credentials
+              key: token
+              optional: true
+      script: |
+        #!/usr/bin/env sh
+        set -eu
+
+        apk add --no-cache curl
+
+        KUSTOMIZE_VERSION=5.4.3
+        curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+          | tar -xz -C /usr/local/bin kustomize
+
+        git config user.name "$(params.git-user-name)"
+        git config user.email "$(params.git-user-email)"
+
+        overlay="$(params.overlay-path)"
+        cd "${overlay}"
+
+        kustomize edit set image "$(params.image-name)=registry.kube-system.svc.cluster.local:80/$(params.image-name):$(params.image-tag)"
+
+        cd "$(workspaces.source.path)"
+        git add "${overlay}/kustomization.yaml"
+
+        if git diff --cached --quiet; then
+          echo "No manifest changes to commit."
+          exit 0
+        fi
+
+        git commit -m "ci: bump $(params.image-name) to $(params.image-tag)"
+
+        if [ -n "${GIT_TOKEN:-}" ]; then
+          origin_url="$(git remote get-url origin | sed -E 's#https://[^@]+@#https://#')"
+          git remote set-url origin "$(echo "${origin_url}" | sed -E "s#https://#https://${GIT_TOKEN}@#")"
+        fi
+
+        git push origin "HEAD:$(params.revision)"
