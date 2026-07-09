@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Polaris GitOps Lab — main setup script for minikube
+# Polaris GitOps Lab — setup for KIND or minikube
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,6 +15,8 @@ load_config() {
     source "${CONFIG_FILE}"
     set +a
   fi
+  CLUSTER_TYPE="${CLUSTER_TYPE:-kind}"
+  KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-polaris}"
   MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
   GIT_BRANCH="${GIT_BRANCH:-main}"
   IMAGE_TAG="${IMAGE_TAG:-v0.1.0}"
@@ -25,21 +27,36 @@ usage() {
 Usage: ./scripts/setup.sh [command]
 
 Commands:
-  all           Run the full lab bootstrap (default)
-  minikube      Start minikube with required addons
-  tekton        Install Tekton Pipelines
-  argocd        Install Argo CD
-  registry      Build and push the initial app image
+  all               Run the full lab bootstrap (default)
+  cluster           Create/prepare cluster (KIND or minikube per config/lab.env)
+  kind              Create KIND cluster + local registry
+  minikube          Start minikube with required addons
+  tekton            Install Tekton Pipelines
+  argocd            Install Argo CD
+  registry          Build and push the initial app image
   tekton-resources  Apply Tekton tasks, pipeline, and RBAC
-  argocd-app    Register the Argo CD Application
-  verify        Print cluster and component status
+  argocd-app        Register the Argo CD Application
+  verify            Print cluster and component status
+
+Set CLUSTER_TYPE in config/lab.env:
+  CLUSTER_TYPE=kind       (default)
+  CLUSTER_TYPE=minikube
 
 Before running:
   1. Copy config/lab.env.example to config/lab.env
-  2. Set GIT_REPO_URL to your remote repository
-  3. Push this repo to that remote (git init, add, commit, push)
+  2. Set GIT_REPO_URL and GIT_TOKEN
+  3. Push this repo to that remote
 
 EOF
+}
+
+cmd_cluster() {
+  case "${CLUSTER_TYPE}" in
+    kind) "${ROOT_DIR}/scripts/setup-kind.sh" ;;
+    minikube) cmd_minikube ;;
+    *) die "Unknown CLUSTER_TYPE: ${CLUSTER_TYPE}. Set kind or minikube in config/lab.env" ;;
+  esac
+  "${ROOT_DIR}/scripts/configure-manifests.sh"
 }
 
 cmd_minikube() {
@@ -89,8 +106,8 @@ cmd_tekton_resources() {
       --from-literal=token="${GIT_TOKEN}" \
       --dry-run=client -o yaml | kubectl apply -f -
   else
-    log "No GIT_TOKEN in config/lab.env — Tekton git push will only work for public repos"
-    log "For private repos, add: export GIT_TOKEN=ghp_... to config/lab.env"
+    log "WARNING: GIT_TOKEN not set in config/lab.env"
+    log "Tekton cannot push manifest updates. See docs/09-github-token.md"
   fi
 }
 
@@ -101,11 +118,24 @@ cmd_argocd_app() {
   sed "s|REPLACE_WITH_YOUR_GIT_URL|${GIT_REPO_URL}|g" \
     "${ROOT_DIR}/argocd/applications/polaris-dev.yaml" | kubectl apply -f -
 
-  log "Syncing application (may take a minute)"
+  if [[ -n "${GIT_TOKEN:-}" ]]; then
+    log "Configuring Argo CD repository credentials (private repo support)"
+    kubectl -n argocd create secret generic repo-polaris \
+      --from-literal=type=git \
+      --from-literal=url="${GIT_REPO_URL}" \
+      --from-literal=password="${GIT_TOKEN}" \
+      --from-literal=username=git \
+      --dry-run=client -o yaml | kubectl apply -f -
+    kubectl label secret repo-polaris -n argocd \
+      argocd.argoproj.io/secret-type=repository --overwrite
+  fi
+
+  log "Waiting for application sync (may take a minute)"
   kubectl -n argocd wait --for=condition=Synced application/polaris-dev --timeout=180s || true
 }
 
 cmd_verify() {
+  log "Cluster type: ${CLUSTER_TYPE}"
   log "Cluster nodes"
   kubectl get nodes
 
@@ -123,7 +153,7 @@ cmd_verify() {
 }
 
 cmd_all() {
-  cmd_minikube
+  cmd_cluster
   cmd_tekton
   cmd_argocd
   cmd_registry
@@ -134,7 +164,7 @@ cmd_all() {
   cat <<EOF
 
 ================================================================================
-Lab bootstrap complete!
+Lab bootstrap complete! (${CLUSTER_TYPE})
 
 Next steps:
   1. Argo CD UI:  ./scripts/port-forward.sh argocd
@@ -154,7 +184,9 @@ main() {
 
   case "${command}" in
     all) cmd_all ;;
-    minikube) cmd_minikube ;;
+    cluster) cmd_cluster ;;
+    kind) CLUSTER_TYPE=kind; cmd_cluster ;;
+    minikube) CLUSTER_TYPE=minikube; cmd_cluster ;;
     tekton) cmd_tekton ;;
     argocd) cmd_argocd ;;
     registry) cmd_registry ;;

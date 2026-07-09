@@ -13,7 +13,7 @@ commonLabels:
 
 images:
   - name: polaris-app
-    newName: registry.kube-system.svc.cluster.local:80/polaris-app
+    newName: localhost:5000/polaris-app
     newTag: v0.1.0
 
 patches:

@@ -22,7 +22,7 @@ spec:
     - name: insecure-registry
       description: Registry host that allows insecure (HTTP) pushes
       type: string
-      default: registry.kube-system.svc.cluster.local:80
+      default: host.docker.internal:5000
   workspaces:
     - name: source
       description: Workspace containing source code

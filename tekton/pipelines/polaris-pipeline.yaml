@@ -59,7 +59,7 @@ spec:
         name: build-push
       params:
         - name: image
-          value: registry.kube-system.svc.cluster.local:80/$(params.image-name):$(params.image-tag)
+          value: host.docker.internal:5000/$(params.image-name):$(params.image-tag)
         - name: context
           value: app
       workspaces:

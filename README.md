@@ -1,6 +1,6 @@
 # Polaris Pipeline — Tekton + ArgoCD GitOps Lab
 
-A hands-on lab for learning GitOps on a local **minikube** cluster. This repo contains:
+A hands-on lab for learning GitOps on a local **KIND** or **minikube** cluster. This repo contains:
 
 - A sample **Python Flask** application
 - **Kustomize** manifests for Kubernetes deployment
@@ -40,7 +40,7 @@ Developer push
 
 | Tool | Purpose |
 |------|---------|
-| [minikube](https://minikube.sigs.k8s.io/docs/start/) | Local Kubernetes cluster |
+| [minikube](https://minikube.sigs.k8s.io/docs/start/) or [KIND](https://kind.sigs.k8s.io/) | Local Kubernetes cluster |
 | [kubectl](https://kubernetes.io/docs/tasks/tools/) | Kubernetes CLI |
 | [docker](https://docs.docker.com/get-docker/) | Build container images |
 | [git](https://git-scm.com/) | Version control |
@@ -71,12 +71,13 @@ cp config/lab.env.example config/lab.env
 Edit `config/lab.env`:
 
 ```bash
+CLUSTER_TYPE=kind
 GIT_REPO_URL=https://github.com/YOUR_USER/polaris-pipeline.git
 GIT_BRANCH=main
 IMAGE_TAG=v0.1.0
 
-# Required for Tekton to push manifest updates (private repos or CI bot)
-# GIT_TOKEN=ghp_your_github_pat
+# Required for Tekton to push manifest updates — see docs/09-github-token.md
+GIT_TOKEN=github_pat_your_token_here
 ```
 
 ### 3. Bootstrap everything
@@ -150,17 +151,20 @@ polaris-pipeline/
 |-------|-------------|
 | [01-prerequisites.md](docs/01-prerequisites.md) | Tools, versions, and Git setup |
 | [02-architecture.md](docs/02-architecture.md) | How Tekton and Argo CD fit together |
-| [03-minikube-setup.md](docs/03-minikube-setup.md) | Cluster and registry configuration |
+| [03-kind-setup.md](docs/03-kind-setup.md) | KIND cluster and registry (default) |
+| [03-minikube-setup.md](docs/03-minikube-setup.md) | minikube cluster and registry |
 | [04-install-components.md](docs/04-install-components.md) | Installing Tekton and Argo CD |
 | [05-argocd-gitops.md](docs/05-argocd-gitops.md) | Deploying with Argo CD |
 | [06-tekton-ci.md](docs/06-tekton-ci.md) | Running the CI pipeline |
 | [07-end-to-end-workflow.md](docs/07-end-to-end-workflow.md) | Full change → deploy walkthrough |
 | [08-troubleshooting.md](docs/08-troubleshooting.md) | Common issues and fixes |
+| [09-github-token.md](docs/09-github-token.md) | Create and configure GIT_TOKEN |
 
 ## Individual setup commands
 
 ```bash
-./scripts/setup.sh minikube          # Start cluster + addons
+./scripts/setup.sh cluster           # KIND or minikube (per config/lab.env)
+./scripts/setup.sh kind              # KIND cluster + registry
 ./scripts/setup.sh tekton            # Install Tekton only
 ./scripts/setup.sh argocd            # Install Argo CD only
 ./scripts/setup.sh registry          # Build initial image
