@@ -2,33 +2,130 @@ name: Build, Scan and Push Docker Image
 
 on:
   push:
-    branches: ["main"]
-  inputs:
-    bump:
-      description: "Which type of bump?"
-      required: false
-      default: "patch"
-      type: choice
-      options:
-        - patch
-        - minor
-        - major
-    deploy_env:
-      description: "Which environment?"
-      required: false
-      default: "dev"
-      type: choice
-      options:
-        - dev
-        - prod
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type (manual runs only)"
+        required: false
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      deploy_env:
+        description: "Kustomize overlay to update"
+        required: false
+        default: dev
+        type: choice
+        options:
+          - dev
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE_NAME: polaris-app
 
 jobs:
-  build-scan-patch:
+  build-scan-push:
+    runs-on: ubuntu-latest
     steps:
-      - name: "checkout"
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Done
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
         run: |
-          echo "Done"
+          pip install flask==3.1.0 pytest==8.3.4
+          cd app
+          python -m pytest -v test_app.py
+
+      - name: Install Kustomize
+        uses: imbosquet/setup-kustomize@v2
+
+      - name: Validate manifests
+        run: kustomize build "deploy/overlays/${{ inputs.deploy_env || 'dev' }}" > /dev/null
+
+      - name: Compute image tag
+        id: meta
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
+          DEPLOY_ENV: ${{ inputs.deploy_env || 'dev' }}
+        run: |
+          OVERLAY="deploy/overlays/${DEPLOY_ENV}"
+          CURRENT="$(grep 'newTag:' "${OVERLAY}/kustomization.yaml" | awk '{print $2}')"
+          VERSION="${CURRENT#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${VERSION%%-*}"
+          MAJOR="${MAJOR:-0}"
+          MINOR="${MINOR:-0}"
+          PATCH="${PATCH:-0}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "${BUMP}" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+            esac
+            TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          else
+            TAG="${CURRENT}-$(git rev-parse --short HEAD)"
+          fi
+
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/${IMAGE_NAME}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "image=${IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "overlay=${OVERLAY}" >> "${GITHUB_OUTPUT}"
+          echo "update_manifests=$([ '${{ github.event_name }}' = 'workflow_dispatch' ] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.image }}:latest
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          format: table
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+
+      - name: Update Kustomize image
+        if: steps.meta.outputs.update_manifests == 'true'
+        run: |
+          cd "${{ steps.meta.outputs.overlay }}"
+          kustomize edit set image "${IMAGE_NAME}=${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"
+
+      - name: Commit and push manifest update
+        if: steps.meta.outputs.update_manifests == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/
+          if git diff --cached --quiet; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+          git commit -m "ci: bump ${{ env.IMAGE_NAME }} to ${{ steps.meta.outputs.tag }}"
+          git push
